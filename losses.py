@@ -35,7 +35,7 @@ class DistillationLoss(torch.nn.Module):
         self.alpha = alpha
         self.tau = tau
 
-    def forward(self, inputs, outputs, labels):
+    def forward(self, inputs, outputs, labels): #! [10, 3, 224, 224] [10, 100] [10, 100]
         """
         Args:
             inputs: The original inputs that are feed to the teacher model
@@ -48,7 +48,7 @@ class DistillationLoss(torch.nn.Module):
         if not isinstance(outputs, torch.Tensor):
             # assume that the model outputs a tuple of [outputs, outputs_kd]
             outputs, outputs_kd = outputs
-        base_loss = self.base_criterion(outputs, labels)
+        base_loss = self.base_criterion(outputs, labels) #! l_task
         if self.distillation_type == 'none':
             return base_loss
 

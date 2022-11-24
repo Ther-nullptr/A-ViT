@@ -186,20 +186,20 @@ class Masked_Attention(nn.Module):
 
     def forward(self, x, mask=None):
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
-        attn = (q @ k.transpose(-2, -1)) * self.scale
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4) #! qkv: [3, 10, 3, 197, 64]
+        q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple) #! [10, 3, 197, 64]
+        attn = (q @ k.transpose(-2, -1)) * self.scale #! [10, 3, 197, 197] 3:heads
 
         if mask is not None:
             # now we need to mask out all the attentions associated with this token
-            attn = attn + mask.view(mask.shape[0], 1, 1, mask.shape[1]) * self.masked_softmax_bias
+            attn = attn + mask.view(mask.shape[0], 1, 1, mask.shape[1]) * self.masked_softmax_bias #! [10, 3, 197, 197] + [10, 1, 1, 197]
             # this additional bias will make attention associated with this token to be zeroed out
             # this incurs at each head, making sure all embedding sections of other tokens ignore these tokens
 
-        attn = attn.softmax(dim=-1)
+        attn = attn.softmax(dim=-1) #! [10, 3, 197, 197]
         attn = self.attn_drop(attn)
 
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C) #! [10, 197, 192]
         x = self.proj(x)
         x = self.proj_drop(x)
 
@@ -251,12 +251,12 @@ class Block_ACT(nn.Module):
             x = x + self.drop_path(self.attn(self.norm1(x)))
             x = x + self.drop_path(self.mlp(self.norm2(x)))
         else:
-            x = x + self.drop_path(self.attn(self.norm1(x*(1-mask).view(bs, token, 1))*(1-mask).view(bs, token, 1), mask=mask))
+            x = x + self.drop_path(self.attn(self.norm1(x*(1-mask).view(bs, token, 1))*(1-mask).view(bs, token, 1), mask=mask)) #! every step need to load the mask!!
             x = x + self.drop_path(self.mlp(self.norm2(x*(1-mask).view(bs, token, 1))*(1-mask).view(bs, token, 1)))
 
         if self.act_mode==4:
-            gate_scale, gate_center = self.args.gate_scale, self.args.gate_center
-            halting_score_token = self.sig(x[:,:,0] * gate_scale - gate_center)
+            gate_scale, gate_center = self.args.gate_scale, self.args.gate_center #! gate_scale: gamma gate_center: beta
+            halting_score_token = self.sig(x[:,:,0] * gate_scale - gate_center) #! x[:,:,0] is the first token [10, 197] {line 10}
             # initially first position used for layer halting, second for token
             # now discarding position 1
             halting_score = [-1, halting_score_token]
@@ -420,13 +420,13 @@ class VisionTransformer(nn.Module):
 
 
     def forward_features_act_token(self, x):
-        x = self.patch_embed(x)
-        cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        x = self.patch_embed(x) #! [10, 3, 224, 224] -> [10, 196, 192]
+        cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks #! [10, 1, 192]
         if self.dist_token is None:
-            x = torch.cat((cls_token, x), dim=1)
+            x = torch.cat((cls_token, x), dim=1) #! [10, 197, 192]
         else:
             x = torch.cat((cls_token, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
-        x = self.pos_drop(x + self.pos_embed)
+        x = self.pos_drop(x + self.pos_embed) #! pos_embed: [1, 197, 192]
 
         # now start the act part
         bs = x.size()[0]  # The batch size
@@ -439,64 +439,64 @@ class VisionTransformer(nn.Module):
             self.rho_token = Variable(torch.zeros(bs, self.total_token_cnt).cuda())
             self.counter_token = Variable(torch.ones(bs, self.total_token_cnt).cuda())
 
-        c_token = self.c_token.clone()
-        R_token = self.R_token.clone()
-        mask_token = self.mask_token.clone()
-        self.rho_token = self.rho_token.detach() * 0.
-        self.counter_token = self.counter_token.detach() * 0 + 1.
+        c_token = self.c_token.clone() #! [10, 197] {line 2}
+        R_token = self.R_token.clone() #! [10, 197] Remainder value {line 3}
+        mask_token = self.mask_token.clone() #! [10, 197] Token mask {line 6}
+        self.rho_token = self.rho_token.detach() * 0. #! Token ponder loss vector {line 5}
+        self.counter_token = self.counter_token.detach() * 0 + 1. #! [10, 197]
         # Will contain the output of this residual layer (weighted sum of outputs of the residual blocks)
         output = None
         # Use out to backbone
         out = x
 
-        if self.args.distr_prior_alpha>0.:
+        if self.args.distr_prior_alpha>0.: #! 0.001
             self.halting_score_layer = []
 
-        for i, l in enumerate(self.blocks):
+        for i, l in enumerate(self.blocks): #! {line 7}
 
             # block out all the parts that are not used
-            out.data = out.data * mask_token.float().view(bs, self.total_token_cnt, 1)
+            out.data = out.data * mask_token.float().view(bs, self.total_token_cnt, 1) #! [10, 197, 192] * [10, 197, 1] {line 8}
 
             # evaluate layer and get halting probability for each sample
             # block_output, h_lst = l.forward_act(out)    # h is a vector of length bs, block_output a 3D tensor
-            block_output, h_lst = l.forward_act(out, 1.-mask_token.float())    # h is a vector of length bs, block_output a 3D tensor
+            block_output, h_lst = l.forward_act(out, 1.-mask_token.float()) #! h_lst: [-1, [10, 197]]   # h is a vector of length bs, block_output a 3D tensor
 
-            if self.args.distr_prior_alpha>0.:
-                self.halting_score_layer.append(torch.mean(h_lst[1][1:]))
+            if self.args.distr_prior_alpha>0.: #! calculate the halting score distribution in eq.11
+                self.halting_score_layer.append(torch.mean(h_lst[1][1:])) #? the mean of [9, 197] 
 
             out = block_output.clone()              # Deep copy needed for the next layer
 
             _, h_token = h_lst # h is layer_halting score, h_token is token halting score, first position discarded
 
             # here, 1 is remaining, 0 is blocked
-            block_output = block_output * mask_token.float().view(bs, self.total_token_cnt, 1)
+            block_output = block_output * mask_token.float().view(bs, self.total_token_cnt, 1) #! [10, 197] -> [10, 197, 1]
 
             # Is this the last layer in the block?
-            if i==len(self.blocks)-1:
-                h_token = Variable(torch.ones(bs, self.total_token_cnt).cuda())
+            if i == len(self.blocks) - 1:
+                h_token = Variable(torch.ones(bs, self.total_token_cnt).cuda()) #! {line 12}
 
             # for token part
-            c_token = c_token + h_token
-            self.rho_token = self.rho_token + mask_token.float()
+            c_token = c_token + h_token #! {line 14}
+            self.rho_token = self.rho_token + mask_token.float() #! {line 15}
 
             # Case 1: threshold reached in this iteration
             # token part
-            reached_token = c_token > 1 - self.eps
-            reached_token = reached_token.float() * mask_token.float()
-            delta1 = block_output * R_token.view(bs, self.total_token_cnt, 1) * reached_token.view(bs, self.total_token_cnt, 1)
-            self.rho_token = self.rho_token + R_token * reached_token
+            reached_token = c_token > 1 - self.eps #! {line 17} #! [10, 197]
+            reached_token = reached_token.float() * mask_token.float() #! 抽取出本轮达到目标值的token，同时还要忽略掉之前被mask掉的token
+            delta1 = block_output * R_token.view(bs, self.total_token_cnt, 1) * reached_token.view(bs, self.total_token_cnt, 1) #! {line 26}
+            self.rho_token = self.rho_token + R_token * reached_token #! {line 20}
 
             # Case 2: threshold not reached
             # token part
             not_reached_token = c_token < 1 - self.eps
-            not_reached_token = not_reached_token.float()
-            R_token = R_token - (not_reached_token.float() * h_token)
-            delta2 = block_output * h_token.view(bs, self.total_token_cnt, 1) * not_reached_token.view(bs, self.total_token_cnt, 1)
+            not_reached_token = not_reached_token.float() #! the masked token is directy included in the range
+            R_token = R_token - (not_reached_token.float() * h_token) #! {line 18}
+            delta2 = block_output * h_token.view(bs, self.total_token_cnt, 1) * not_reached_token.view(bs, self.total_token_cnt, 1) #! {line 24}
 
             self.counter_token = self.counter_token + not_reached_token # These data points will need at least one more layer
 
             # Update the mask
-            mask_token = c_token < 1 - self.eps
+            mask_token = c_token < 1 - self.eps #! {line 28}
 
             if output is None:
                 output = delta1 + delta2
@@ -506,7 +506,7 @@ class VisionTransformer(nn.Module):
         x = self.norm(output)
 
         if self.dist_token is None:
-            return self.pre_logits(x[:, 0])
+            return self.pre_logits(x[:, 0]) #! [10, 192]
         else:
             return x[:, 0], x[:, 1]
 
@@ -548,7 +548,7 @@ class VisionTransformer(nn.Module):
             else:
                 return (x + x_dist) / 2
         else:
-            x = self.head(x)
+            x = self.head(x) #! [1, 100]
         # return x, rho, count # discarded from v1
         return x
 
