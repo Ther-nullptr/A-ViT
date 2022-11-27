@@ -163,3 +163,6 @@ cython_debug/
 *.tar.gz
 a-vit-weights/
 CIFAR-100/
+token_act_visualization/
+wandb/
+results/

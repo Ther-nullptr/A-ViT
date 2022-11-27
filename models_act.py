@@ -23,7 +23,7 @@ __all__ = [
 
 
 @register_model
-def avit_tiny_patch16_224(pretrained=False, **kwargs):
+def avit_tiny_patch16_224(pretrained=True, **kwargs):
 
     from timm.models.act_vision_transformer import VisionTransformer
 
@@ -43,7 +43,7 @@ def avit_tiny_patch16_224(pretrained=False, **kwargs):
 
 
 @register_model
-def avit_small_patch16_224(pretrained=False, **kwargs):
+def avit_small_patch16_224(pretrained=True, **kwargs):
 
     from timm.models.act_vision_transformer import VisionTransformer
 

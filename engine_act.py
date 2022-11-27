@@ -34,6 +34,7 @@ import pickle
 import heapq, random
 from PIL import Image
 import cv2
+import wandb
 
 
 def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
@@ -144,6 +145,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
 @torch.no_grad()
 def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
+    task_name = args.model + os.path.split(args.finetune)[1] + str(args.batch_size) + str(args.epochs)
+
+    wandb.init(project='A-ViT', name=task_name, reinit = True, entity = "ther")
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -197,6 +201,15 @@ def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
         tf_writer.add_scalar('test/avg_cnt_token_diff', float(np.mean(cnt_token_diff)), model.batch_cnt)
         tf_writer.add_scalar('test/expected_depth_ratio', float(np.mean(cnt_token/12)), model.batch_cnt)
 
+    wandb.log({'test/acc_top1': metric_logger.acc1.global_avg})
+    wandb.log({'test/acc_top5': metric_logger.acc5.global_avg})
+    wandb.log({'test/loss': metric_logger.loss.global_avg})
+    wandb.log({'test/cnt_token_mean': float(np.mean(cnt_token))})
+    wandb.log({'test/cnt_token_max': float(np.max(cnt_token))})
+    wandb.log({'test/cnt_token_min': float(np.min(cnt_token))})
+    wandb.log({'test/avg_cnt_token_diff': float(np.mean(cnt_token_diff))})
+    wandb.log({'test/expected_depth_ratio': float(np.mean(cnt_token/12))})
+
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
@@ -224,6 +237,7 @@ def visualize(data_loader, model, device, epoch, tf_writer=None, args=None):
     import matplotlib.pyplot as plt
     from PIL import Image
 
+    task_name = args.model + os.path.split(args.finetune)[1] + str(args.batch_size) + str(args.epochs)
     # this snipet visualize the token depth distribution of an avit model
     # more particular, it saves the image with the largset token depth std. per imagenet class
     # in validation set.
@@ -273,7 +287,7 @@ def visualize(data_loader, model, device, epoch, tf_writer=None, args=None):
                 max_std=value
                 idx=key
 
-                file_path = "./token_act_visualization/"
+                file_path = "./token_act_visualization/" + task_name
                 if not os.path.exists(file_path):
                     os.makedirs(file_path)
 
@@ -286,23 +300,21 @@ def visualize(data_loader, model, device, epoch, tf_writer=None, args=None):
 
                 if 1:
                     # save token depth heat map
-                    plt.savefig(file_path + 'class{}_token_depth.jpg'.format(target[idx].data.item()))
+                    plt.savefig(file_path + '/class{}_token_depth.jpg'.format(target[idx].data.item()))
                 if 1:
                     # save original image
-                    vutils.save_image(images[idx].data, file_path + 'class{}_ref.jpg'.format(target[idx].data.item()),
+                    vutils.save_image(images[idx].data, file_path + '/class{}_ref.jpg'.format(target[idx].data.item()),
                                           normalize=True, scale_each=True)
                 if 1:
                     # save concatenated image
                     # note that this snippet is not fully optimized in speed
-                    im1 = cv2.imread(file_path + 'class{}_ref.jpg'.format(target[idx].data.item()))
-                    im2 = cv2.imread(file_path + 'class{}_token_depth.jpg'.format(target[idx].data.item()))
+                    im1 = cv2.imread(file_path + '/class{}_ref.jpg'.format(target[idx].data.item()))
+                    im2 = cv2.imread(file_path + '/class{}_token_depth.jpg'.format(target[idx].data.item()))
 
                     if im1 is not None and im2 is not None:
-                        cv2.imwrite(file_path + 'class{}_combined.jpg'.format(target[idx].data.item()), merge_image(im1, im2))
+                        cv2.imwrite(file_path + '/class{}_combined.jpg'.format(target[idx].data.item()), merge_image(im1, im2))
 
                 cb.remove()
 
     print('Visualization done.')
     exit()
-
-    return
