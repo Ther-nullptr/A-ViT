@@ -35,6 +35,7 @@ import heapq, random
 from PIL import Image
 import cv2
 import wandb
+import thop
 
 
 def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
@@ -164,6 +165,7 @@ def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
 
         # compute output
         with torch.cuda.amp.autocast():
+            macs, _ = thop.profile(model, inputs=(images, ))
             output = model(images)
             loss = criterion(output, target)
 
@@ -173,22 +175,24 @@ def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
         metric_logger.update(loss=loss.item())
         metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
         metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
+        metric_logger.meters['macs'].update(macs, n=batch_size)
+        print(batch_size)
 
         if cnt_token is None:
-            cnt_token = model.counter_token.data.cpu().numpy()
+            cnt_token = model.counter_token.data.cpu().numpy() #! [128, 197]
         else:
-            cnt_token = np.concatenate((cnt_token, model.counter_token.data.cpu().numpy()))
+            cnt_token = np.concatenate((cnt_token, model.counter_token.data.cpu().numpy())) #! [128 * n, 197]
 
         if cnt_token_diff is None:
-            cnt_token_diff = (torch.max(model.counter_token, dim=-1)[0]-torch.min(model.counter_token, dim=-1)[0]).data.cpu().numpy()
+            cnt_token_diff = (torch.max(model.counter_token, dim=-1)[0]-torch.min(model.counter_token, dim=-1)[0]).data.cpu().numpy() #! [128]
         else:
             cnt_token_diff = np.concatenate((cnt_token_diff, \
-            (torch.max(model.counter_token, dim=-1)[0]-torch.min(model.counter_token, dim=-1)[0]).data.cpu().numpy()))
+            (torch.max(model.counter_token, dim=-1)[0]-torch.min(model.counter_token, dim=-1)[0]).data.cpu().numpy())) #! [128 * n]
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
-          .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
+    print("* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f} macs {macs}"
+          .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss, macs=metric_logger.macs))
 
     if tf_writer is not None and torch.cuda.current_device()==0:
         # writing all values
