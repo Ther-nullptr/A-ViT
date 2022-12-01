@@ -34,6 +34,8 @@ from torch.autograd import Variable
 
 import numpy as np
 
+import wandb
+
 _logger = logging.getLogger(__name__)
 
 
@@ -376,6 +378,8 @@ class VisionTransformer(nn.Module):
         self.counter_token = None
         self.total_token_cnt = num_patches + self.num_tokens
 
+        self.step = 0 # only for debug of record when to reach the threshold
+
         if args.distr_prior_alpha >0. :
             self.distr_target = torch.Tensor(get_distribution_target(standardized=True)).cuda()
             self.kl_loss = nn.KLDivLoss(reduction='batchmean').cuda()
@@ -482,6 +486,11 @@ class VisionTransformer(nn.Module):
             # Case 1: threshold reached in this iteration
             # token part
             reached_token = c_token > 1 - self.eps #! {line 17} #! [10, 197]
+            if self.step % 10 == 0:
+                print(f'avg_val_{i}', torch.mean(c_token).item())
+                wandb.log({f'avg_val_{i}': torch.mean(c_token).item()})
+                print(f"reached_token_ratio_{i}", torch.mean(reached_token.float()).item())
+                wandb.log({f"reached_token_ratio_{i}": torch.mean(reached_token.float()).item()})
             reached_token = reached_token.float() * mask_token.float() #! 抽取出本轮达到目标值的token，同时还要忽略掉之前被mask掉的token
             delta1 = block_output * R_token.view(bs, self.total_token_cnt, 1) * reached_token.view(bs, self.total_token_cnt, 1) #! {line 26}
             self.rho_token = self.rho_token + R_token * reached_token #! {line 20}
@@ -504,6 +513,8 @@ class VisionTransformer(nn.Module):
                 output = output + (delta1 + delta2)
 
         x = self.norm(output)
+
+        self.step += 1
 
         if self.dist_token is None:
             return self.pre_logits(x[:, 0]) #! [10, 192]

@@ -165,7 +165,6 @@ def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
 
         # compute output
         with torch.cuda.amp.autocast():
-            macs, _ = thop.profile(model, inputs=(images, ))
             output = model(images)
             loss = criterion(output, target)
 
@@ -175,8 +174,6 @@ def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
         metric_logger.update(loss=loss.item())
         metric_logger.meters['acc1'].update(acc1.item(), n=batch_size)
         metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
-        metric_logger.meters['macs'].update(macs, n=batch_size)
-        print(batch_size)
 
         if cnt_token is None:
             cnt_token = model.counter_token.data.cpu().numpy() #! [128, 197]
