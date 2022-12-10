@@ -463,7 +463,7 @@ class VisionTransformer(nn.Module):
 
             # evaluate layer and get halting probability for each sample
             # block_output, h_lst = l.forward_act(out)    # h is a vector of length bs, block_output a 3D tensor
-            block_output, h_lst = l.forward_act(out, 1.-mask_token.float()) #! h_lst: [-1, [10, 197]]   # h is a vector of length bs, block_output a 3D tensor
+            block_output, h_lst = l.forward_act(out, 1.- mask_token.float()) #! h_lst: [-1, [10, 197]]   # h is a vector of length bs, block_output a 3D tensor
 
             if self.args.distr_prior_alpha>0.: #! calculate the halting score distribution in eq.11
                 self.halting_score_layer.append(torch.mean(h_lst[1][1:])) #? the mean of [9, 197] 

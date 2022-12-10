@@ -188,8 +188,8 @@ def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print("* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f} macs {macs}"
-          .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss, macs=metric_logger.macs))
+    print("* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}"
+          .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
 
     if tf_writer is not None and torch.cuda.current_device()==0:
         # writing all values
