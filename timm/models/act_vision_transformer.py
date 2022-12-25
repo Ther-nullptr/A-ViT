@@ -169,7 +169,7 @@ default_cfgs = {
 
 
 class Masked_Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., mask=None, masked_softmax_bias=-1000.):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., mask=None, masked_softmax_bias=-1000., softermax = True):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -186,6 +186,14 @@ class Masked_Attention(nn.Module):
 
         self.masked_softmax_bias = masked_softmax_bias
 
+        self.softermax = softermax
+        if self.softermax:
+            print('using softermax')
+
+    def softermax_func(self, x, dim=-1):
+        max_val, _ = torch.max(x, dim, keepdims = True)
+        return torch.exp2(x - max_val) / torch.exp2(x - max_val).sum(dim, keepdim = True)
+
     def forward(self, x, mask=None):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4) #! qkv: [3, 10, 3, 197, 64]
@@ -197,8 +205,10 @@ class Masked_Attention(nn.Module):
             attn = attn + mask.view(mask.shape[0], 1, 1, mask.shape[1]) * self.masked_softmax_bias #! [10, 3, 197, 197] + [10, 1, 1, 197]
             # this additional bias will make attention associated with this token to be zeroed out
             # this incurs at each head, making sure all embedding sections of other tokens ignore these tokens
-
-        attn = attn.softmax(dim=-1) #! [10, 3, 197, 197]
+        if self.softermax:
+            attn = self.softermax_func(attn, dim=-1)
+        else:
+            attn = attn.softmax(dim=-1) #! [10, 3, 197, 197]
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, C) #! [10, 197, 192]
@@ -206,7 +216,10 @@ class Masked_Attention(nn.Module):
         x = self.proj_drop(x)
 
         return x
-
+    
+    @staticmethod
+    def softermax(x, dim=-1):
+        return torch.exp2(x - torch.max(x, dim)) / torch.exp2(x - torch.max(x, dim)).sum()
 
 class Block_ACT(nn.Module):
 
@@ -466,7 +479,7 @@ class VisionTransformer(nn.Module):
             block_output, h_lst = l.forward_act(out, 1.- mask_token.float()) #! h_lst: [-1, [10, 197]]   # h is a vector of length bs, block_output a 3D tensor
 
             if self.args.distr_prior_alpha>0.: #! calculate the halting score distribution in eq.11
-                self.halting_score_layer.append(torch.mean(h_lst[1][1:])) #? the mean of [9, 197] 
+                self.halting_score_layer.append(torch.mean(h_lst[1][:, 1:], dim=-1)) #? the mean of [9, 197] 
 
             out = block_output.clone()              # Deep copy needed for the next layer
 
@@ -487,9 +500,9 @@ class VisionTransformer(nn.Module):
             # token part
             reached_token = c_token > 1 - self.eps #! {line 17} #! [10, 197]
             if self.step % 10 == 0:
-                print(f'avg_val_{i}', torch.mean(c_token).item())
+                #print(f'avg_val_{i}', torch.mean(c_token).item())
                 wandb.log({f'avg_val_{i}': torch.mean(c_token).item()})
-                print(f"reached_token_ratio_{i}", torch.mean(reached_token.float()).item())
+                #print(f"reached_token_ratio_{i}", torch.mean(reached_token.float()).item())
                 wandb.log({f"reached_token_ratio_{i}": torch.mean(reached_token.float()).item()})
             reached_token = reached_token.float() * mask_token.float() #! 抽取出本轮达到目标值的token，同时还要忽略掉之前被mask掉的token
             delta1 = block_output * R_token.view(bs, self.total_token_cnt, 1) * reached_token.view(bs, self.total_token_cnt, 1) #! {line 26}

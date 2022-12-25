@@ -148,7 +148,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
     task_name = args.model + os.path.split(args.finetune)[1] + str(args.batch_size) + str(args.epochs)
 
-    wandb.init(project='A-ViT', name=task_name, reinit = True, entity = "ther")
+    wandb.init(project='A-ViT', name=f'{task_name}_softermax', reinit = True, entity = "ther")
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")

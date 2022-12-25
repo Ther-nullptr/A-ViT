@@ -15,6 +15,7 @@
 
 # The code is modified to accomodate A-ViT training
 
+import wandb
 import argparse
 import datetime
 import numpy as np
@@ -493,5 +494,8 @@ if __name__ == '__main__':
         else:
             print('Visualization of this model is not yet supported. Please modify the code and use only the function accordingly.')
             exit()
+    
+    task_name = args.model + os.path.split(args.finetune)[1] + str(args.batch_size) + str(args.epochs)
+    wandb.init(project='A-ViT', name=f'{task_name}_softermax_train', reinit = True, entity = "ther")
 
     main(args)
