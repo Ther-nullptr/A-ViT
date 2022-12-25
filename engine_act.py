@@ -144,12 +144,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-
 @torch.no_grad()
 def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
-    task_name = args.model + os.path.split(args.finetune)[1] + str(args.batch_size) + str(args.epochs)
-
-    wandb.init(project='A-ViT', name=f'{task_name}_softermax', reinit = True, entity = "ther")
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -177,19 +173,19 @@ def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
         metric_logger.meters['acc5'].update(acc5.item(), n=batch_size)
 
         if cnt_token is None:
-            cnt_token = model.counter_token.data.cpu().numpy() #! [128, 197]
+            cnt_token = model.module.counter_token.data.cpu().numpy()
         else:
-            cnt_token = np.concatenate((cnt_token, model.counter_token.data.cpu().numpy())) #! [128 * n, 197]
+            cnt_token = np.concatenate((cnt_token, model.module.counter_token.data.cpu().numpy()))
 
         if cnt_token_diff is None:
-            cnt_token_diff = (torch.max(model.counter_token, dim=-1)[0]-torch.min(model.counter_token, dim=-1)[0]).data.cpu().numpy() #! [128]
+            cnt_token_diff = (torch.max(model.module.counter_token, dim=-1)[0]-torch.min(model.module.counter_token, dim=-1)[0]).data.cpu().numpy()
         else:
             cnt_token_diff = np.concatenate((cnt_token_diff, \
-            (torch.max(model.counter_token, dim=-1)[0]-torch.min(model.counter_token, dim=-1)[0]).data.cpu().numpy())) #! [128 * n]
+            (torch.max(model.module.counter_token, dim=-1)[0]-torch.min(model.module.counter_token, dim=-1)[0]).data.cpu().numpy()))
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    print("* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}"
+    print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
           .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
 
     if tf_writer is not None and torch.cuda.current_device()==0:
@@ -197,11 +193,11 @@ def evaluate(data_loader, model, device, epoch, tf_writer=None, args=None):
         tf_writer.add_scalar('test/acc_top1', metric_logger.acc1.global_avg, epoch)
         tf_writer.add_scalar('test/acc_top5', metric_logger.acc5.global_avg, epoch)
         tf_writer.add_scalar('test/loss', metric_logger.loss.global_avg, epoch)
-        tf_writer.add_scalar('test/cnt_token_mean', float(np.mean(cnt_token)), model.batch_cnt)
-        tf_writer.add_scalar('test/cnt_token_max', float(np.max(cnt_token)), model.batch_cnt)
-        tf_writer.add_scalar('test/cnt_token_min', float(np.min(cnt_token)), model.batch_cnt)
-        tf_writer.add_scalar('test/avg_cnt_token_diff', float(np.mean(cnt_token_diff)), model.batch_cnt)
-        tf_writer.add_scalar('test/expected_depth_ratio', float(np.mean(cnt_token/12)), model.batch_cnt)
+        tf_writer.add_scalar('test/cnt_token_mean', float(np.mean(cnt_token)), model.module.batch_cnt)
+        tf_writer.add_scalar('test/cnt_token_max', float(np.max(cnt_token)), model.module.batch_cnt)
+        tf_writer.add_scalar('test/cnt_token_min', float(np.min(cnt_token)), model.module.batch_cnt)
+        tf_writer.add_scalar('test/avg_cnt_token_diff', float(np.mean(cnt_token_diff)), model.module.batch_cnt)
+        tf_writer.add_scalar('test/expected_depth_ratio', float(np.mean(cnt_token/12)), model.module.batch_cnt)
 
     wandb.log({'test/acc_top1': metric_logger.acc1.global_avg})
     wandb.log({'test/acc_top5': metric_logger.acc5.global_avg})
