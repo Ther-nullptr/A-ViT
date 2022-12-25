@@ -50,7 +50,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 100
 
-    for samples, targets in metric_logger.log_every(data_loader, print_freq, header): #! samples: a tuple length with batch size, [3, 224, 224] labels: length with batch size
+    for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
 
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
@@ -65,26 +65,26 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
             loss = criterion(samples, outputs, targets)
 
             # now get the token rhos
-            rho_token = torch.mean(model.rho_token) #! {line 30}
+            rho_token = torch.mean(model.module.rho_token)
             # for analysis and keeping track purpose
-            cnt_token = model.counter_token.data.cpu().numpy()
+            cnt_token = model.module.counter_token.data.cpu().numpy()
             # for analysis and keeping track purpose
-            cnt_token_diff = (torch.max(model.counter_token, dim=-1)[0]-torch.min(model.counter_token, dim=-1)[0]).data.cpu().numpy()
+            cnt_token_diff = (torch.max(model.module.counter_token, dim=-1)[0]-torch.min(model.module.counter_token, dim=-1)[0]).data.cpu().numpy()
 
-        model.batch_cnt += 1
+        model.module.batch_cnt += 1
 
         # Ponder loss
-        ponder_loss_token = torch.mean(rho_token) * args.ponder_token_scale #! L_ponder
+        ponder_loss_token = torch.mean(rho_token) * args.ponder_token_scale
         loss += ponder_loss_token
 
         # Distributional prior
         if args.distr_prior_alpha > 0.:
 
             # KL loss
-            halting_score_distr = torch.stack(model.halting_score_layer) #! [12]
+            halting_score_distr = torch.stack(model.module.halting_score_layer)
             halting_score_distr = halting_score_distr / torch.sum(halting_score_distr)
             halting_score_distr = torch.clamp(halting_score_distr, 0.01, 0.99)
-            distr_prior_loss = args.distr_prior_alpha * model.kl_loss(halting_score_distr.log(), model.distr_target)
+            distr_prior_loss = args.distr_prior_alpha * model.module.kl_loss(halting_score_distr.log(), model.module.distr_target)
 
             if distr_prior_loss.item() > 0.:
                 loss += distr_prior_loss
@@ -125,23 +125,24 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
 
         if tf_writer is not None and torch.cuda.current_device()==0:
-            if model.batch_cnt % print_freq == 0:
-                tf_writer.add_scalar('train/lr', optimizer.param_groups[0]["lr"], model.batch_cnt)
-                tf_writer.add_scalar('train/loss', loss_value, model.batch_cnt)
-                tf_writer.add_scalar('train/cnt_token_mean', float(np.mean(cnt_token)), model.batch_cnt)
-                tf_writer.add_scalar('train/cnt_token_max', float(np.max(cnt_token)), model.batch_cnt)
-                tf_writer.add_scalar('train/cnt_token_min', float(np.min(cnt_token)), model.batch_cnt)
-                tf_writer.add_scalar('train/avg_cnt_token_diff', float(np.mean(cnt_token_diff)), model.batch_cnt)
-                tf_writer.add_scalar('train/ponder_loss_token', ponder_loss_token.item(), model.batch_cnt)
-                tf_writer.add_scalar('train/expected_depth_ratio', float(np.mean(cnt_token/12.)), model.batch_cnt)
+            if model.module.batch_cnt % print_freq == 0:
+                tf_writer.add_scalar('train/lr', optimizer.param_groups[0]["lr"], model.module.batch_cnt)
+                tf_writer.add_scalar('train/loss', loss_value, model.module.batch_cnt)
+                tf_writer.add_scalar('train/cnt_token_mean', float(np.mean(cnt_token)), model.module.batch_cnt)
+                tf_writer.add_scalar('train/cnt_token_max', float(np.max(cnt_token)), model.module.batch_cnt)
+                tf_writer.add_scalar('train/cnt_token_min', float(np.min(cnt_token)), model.module.batch_cnt)
+                tf_writer.add_scalar('train/avg_cnt_token_diff', float(np.mean(cnt_token_diff)), model.module.batch_cnt)
+                tf_writer.add_scalar('train/ponder_loss_token', ponder_loss_token.item(), model.module.batch_cnt)
+                tf_writer.add_scalar('train/expected_depth_ratio', float(np.mean(cnt_token/12.)), model.module.batch_cnt)
                 if args.distr_prior_alpha > 0.:
-                    tf_writer.add_scalar('train/distr_prior_loss', distr_prior_loss.item(), model.batch_cnt)
+                    tf_writer.add_scalar('train/distr_prior_loss', distr_prior_loss.item(), model.module.batch_cnt)
 
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
 
 
 @torch.no_grad()
