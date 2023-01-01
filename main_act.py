@@ -196,6 +196,7 @@ def get_args_parser():
     parser.add_argument('--gate_center', default= 3., type=float, help="constant for token control gate re-center, negatived when applied")
     parser.add_argument('--warmup_epoch', default=0, type=int, help="warm up epochs for act")
     parser.add_argument('--distr_prior_alpha', default=0.01, type=float, help="scaling for kl of distributional prior")
+    parser.add_argument('--softmax_base', default=torch.exp(torch.tensor(1)), type=float, help="softmax base for token depth")
 
     # a sample visualiztion of tiny for token depth and attention intepretation.
     parser.add_argument('--demo', action='store_true',

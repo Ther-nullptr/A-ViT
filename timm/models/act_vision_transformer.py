@@ -169,7 +169,7 @@ default_cfgs = {
 
 
 class Masked_Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., mask=None, masked_softmax_bias=-1000., softermax = True):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., mask=None, masked_softmax_bias=-1000., softmax_base = torch.exp(torch.tensor(1))):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -185,14 +185,13 @@ class Masked_Attention(nn.Module):
                          # 0's are the tokens to continue, 1's are the tokens masked out
 
         self.masked_softmax_bias = masked_softmax_bias
+        self.base = softmax_base
+        print(f'base is {self.base}')
 
-        self.softermax = softermax
-        if self.softermax:
-            print('using softermax')
 
     def softermax_func(self, x, dim=-1):
         max_val, _ = torch.max(x, dim, keepdims = True)
-        return torch.exp2(x - max_val) / torch.exp2(x - max_val).sum(dim, keepdim = True)
+        return torch.pow(self.base, x - max_val) / torch.pow(self.base, x - max_val).sum(dim, keepdim = True)
 
     def forward(self, x, mask=None):
         B, N, C = x.shape
@@ -205,10 +204,7 @@ class Masked_Attention(nn.Module):
             attn = attn + mask.view(mask.shape[0], 1, 1, mask.shape[1]) * self.masked_softmax_bias #! [10, 3, 197, 197] + [10, 1, 1, 197]
             # this additional bias will make attention associated with this token to be zeroed out
             # this incurs at each head, making sure all embedding sections of other tokens ignore these tokens
-        if self.softermax:
-            attn = self.softermax_func(attn, dim=-1)
-        else:
-            attn = attn.softmax(dim=-1) #! [10, 3, 197, 197]
+        attn = self.softermax_func(attn, dim=-1)
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, C) #! [10, 197, 192]
@@ -224,10 +220,10 @@ class Masked_Attention(nn.Module):
 class Block_ACT(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, args=None, index=-1, num_patches=197):
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, args=None, index=-1, num_patches=197, softmax_base = torch.exp(torch.tensor(1))):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Masked_Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
+        self.attn = Masked_Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop, softmax_base = softmax_base)
 
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -300,7 +296,7 @@ class VisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
-                 act_layer=None, weight_init='', args=None):
+                 act_layer=None, weight_init='', softmax_base=[torch.exp(torch.tensor(1.)) for i in range(12)], args=None):
         """
         Args:
             img_size (int, tuple): input image size
@@ -323,6 +319,7 @@ class VisionTransformer(nn.Module):
         """
 
         super().__init__()
+        softmax_base = torch.tensor([4,4,4,4,4,4,2,2,2,2,2,2]).float()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
         self.num_tokens = 2 if distilled else 1
@@ -343,7 +340,7 @@ class VisionTransformer(nn.Module):
         self.blocks = nn.Sequential(*[
             Block_ACT(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, drop=drop_rate,
-                attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer, args=args, index=i, num_patches=self.patch_embed.num_patches+1)
+                attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer, args=args, index=i, softmax_base=softmax_base[i], num_patches=self.patch_embed.num_patches+1)
             for i in range(depth)])
 
         self.norm = norm_layer(embed_dim)
